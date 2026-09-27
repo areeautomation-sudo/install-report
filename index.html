@@ -38,6 +38,14 @@
   #loading, #done { text-align:center; padding:60px 20px; }
   .spin { width:40px; height:40px; border:4px solid #ddd; border-top-color:var(--pri); border-radius:50%; animation:s 1s linear infinite; margin:0 auto 12px; }
   @keyframes s { to { transform:rotate(360deg); } }
+  .combo { position:relative; }
+  .combo-list { position:absolute; left:0; right:0; top:100%; z-index:20; background:#fff; border:1px solid var(--bd); border-radius:8px; margin-top:4px; max-height:260px; overflow:auto; box-shadow:0 6px 16px rgba(0,0,0,.12); }
+  .combo-list .grp { padding:6px 12px; font-size:12px; font-weight:700; color:var(--mut); background:#f6f8fa; }
+  .combo-list .opt { padding:11px 12px; border-bottom:1px solid #eef1f4; cursor:pointer; }
+  .combo-list .opt:active, .combo-list .opt.act { background:#e7f8ee; }
+  .combo-list .opt small { color:var(--mut); }
+  .combo-list .none { padding:12px; color:var(--mut); }
+  .t-search.ok { border-color:var(--pri); background:#f4fdf7; }
   .hidden { display:none !important; }
   table.sum { width:100%; border-collapse:collapse; font-size:14px; text-align:left; margin-top:10px; }
   table.sum td { padding:6px 4px; border-bottom:1px solid #eef1f4; }
@@ -171,7 +179,11 @@ function addTaskRow(v) {
   div.className = 'task';
   div.innerHTML = `
     <button class="del" type="button" title="ลบ">×</button>
-    <select class="t-id">${taskOptions(v.taskId)}</select>
+    <div class="combo">
+      <input class="t-search" type="search" autocomplete="off" placeholder="🔍 พิมพ์ค้นหางาน เช่น EMT, THW, โคม">
+      <input class="t-id" type="hidden" value="">
+      <div class="combo-list hidden"></div>
+    </div>
     <div class="row">
       <div><span class="unit">จำนวน</span><input class="t-qty" type="number" inputmode="decimal" min="0" step="any" value="${v.qty || ''}"></div>
       <div><span>ชั่วโมงที่ทีมใช้กับงานนี้</span><input class="t-hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="${v.hours || ''}"></div>
@@ -180,11 +192,70 @@ function addTaskRow(v) {
   div.querySelector('.del').onclick = () => { div.remove(); saveDraft(); };
   div.addEventListener('input', () => { updatePer(); saveDraft(); });
   div.addEventListener('change', () => { updatePer(); saveDraft(); });
+  setupCombo(div, v.taskId);
   $('tasks').appendChild(div);
   updatePer();
 }
 
 function selectedEmpIds() { return [...$('empList').querySelectorAll('input:checked')].map(i => i.value); }
+
+/* ---------- ช่องเลือกงานแบบพิมพ์ค้นหา ---------- */
+const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+const taskLabel = t => `${t.name} (${t.unit})`;
+
+function setupCombo(div, selectedId) {
+  const inp = div.querySelector('.t-search'), hid = div.querySelector('.t-id'), list = div.querySelector('.combo-list');
+  let items = [], act = -1;
+
+  const pick = t => {
+    hid.value = t ? t.id : '';
+    inp.value = t ? taskLabel(t) : '';
+    inp.classList.toggle('ok', !!t);
+    list.classList.add('hidden');
+    updatePer(); saveDraft();
+  };
+  const render = () => {
+    const words = norm(inp.value).split(' ').filter(Boolean);
+    const used = new Set([...document.querySelectorAll('.t-id')].filter(h => h !== hid).map(h => h.value));
+    items = master.tasks.filter(t => !used.has(t.id) &&
+      words.every(w => norm(t.name + ' ' + t.category + ' ' + t.unit).includes(w)));
+    act = items.length ? 0 : -1;
+    let html = '', grp = null;
+    items.forEach((t, i) => {
+      if (t.category !== grp) { grp = t.category; html += `<div class="grp">${esc(grp)}</div>`; }
+      html += `<div class="opt${i === act ? ' act' : ''}" data-i="${i}">${esc(t.name)} <small>(${esc(t.unit)})</small></div>`;
+    });
+    list.innerHTML = html || '<div class="none">ไม่พบงานที่ค้นหา</div>';
+    list.classList.remove('hidden');
+  };
+  const highlight = () => list.querySelectorAll('.opt').forEach(o => {
+    const on = Number(o.dataset.i) === act; o.classList.toggle('act', on); if (on) o.scrollIntoView({ block: 'nearest' });
+  });
+
+  inp.addEventListener('focus', () => { if (hid.value) inp.select(); render(); });
+  inp.addEventListener('input', e => { e.stopPropagation(); hid.value = ''; inp.classList.remove('ok'); render(); updatePer(); });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); act = Math.min(act + 1, items.length - 1); highlight(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); act = Math.max(act - 1, 0); highlight(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (items[act]) { pick(items[act]); div.querySelector('.t-qty').focus(); } }
+    else if (e.key === 'Escape') { list.classList.add('hidden'); }
+  });
+  // ใช้ pointerdown เพื่อให้เลือกได้ก่อน input เสีย focus (สำคัญบนมือถือ)
+  list.addEventListener('pointerdown', e => {
+    const o = e.target.closest('.opt'); if (!o) return;
+    e.preventDefault(); pick(items[Number(o.dataset.i)]); div.querySelector('.t-qty').focus();
+  });
+  inp.addEventListener('blur', () => setTimeout(() => {
+    list.classList.add('hidden');
+    if (!hid.value) {           // พิมพ์ตรงกับชื่องานพอดี → เลือกให้อัตโนมัติ
+      const exact = master.tasks.find(t => norm(t.name) === norm(inp.value) || norm(taskLabel(t)) === norm(inp.value));
+      if (exact) pick(exact);
+    }
+  }, 150));
+
+  const init = master.tasks.find(t => t.id === selectedId);
+  if (init) { hid.value = init.id; inp.value = taskLabel(init); inp.classList.add('ok'); }
+}
 
 function renderChips() {
   const ids = new Set(selectedEmpIds());
@@ -226,7 +297,7 @@ function validate(p) {
   const ids = new Set();
   for (let i = 0; i < p.items.length; i++) {
     const it = p.items[i], n = i + 1;
-    if (!it.taskId) return `รายการที่ ${n}: ยังไม่เลือกงาน`;
+    if (!it.taskId) return `รายการที่ ${n}: ยังไม่เลือกงาน (พิมพ์ค้นหาแล้วแตะเลือกจากรายการ)`;
     if (ids.has(it.taskId)) return `รายการที่ ${n}: งานซ้ำกับรายการก่อนหน้า`;
     ids.add(it.taskId);
     if (!(parseFloat(it.qty) > 0)) return `รายการที่ ${n}: จำนวนต้องมากกว่า 0`;
