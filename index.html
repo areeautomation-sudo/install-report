@@ -402,16 +402,40 @@ async function showDone(res) {
   $('doneInfo').querySelector('.pdf-btn')?.addEventListener('click', e => {
     try { if (liff.isInClient()) { e.preventDefault(); liff.openWindow({ url: res.pdfUrl, external: true }); } } catch (err) {}
   });
-  // ส่งสรุปเข้าแชท (ทำงานเมื่อเปิดจากห้องแชทและเปิด scope chat_message.write)
+  // ส่งสรุปเข้าแชท/กลุ่มที่เปิดฟอร์ม ในนามผู้ใช้ (ไม่ใช้โควตาข้อความของ OA) — ต้องเปิด scope chat_message.write
+  let sentTo = '';
   try {
     const ctx = liff.getContext();
-    if (ctx && ['utou', 'group', 'room'].includes(ctx.type)) {
-      await liff.sendMessages([{ type: 'text', text:
-        `📋 รายงาน ${s.date}\n📍 ${s.site}\n👷 ${s.employees.join(', ')}\n` +
-        s.items.map(i => `• ${i.name} ${i.qty} ${i.unit} / ${i.hours} ชม.`).join('\n') +
-        (res.pdfUrl ? `\n📄 ${res.pdfUrl}` : '') }]);
+    if (ctx && ['utou', 'group', 'room', 'square_chat'].includes(ctx.type)) {
+      await liff.sendMessages([{ type: 'text', text: buildChatText(res) }]);
+      sentTo = ctx.type === 'utou' ? 'แชทส่วนตัว' : 'กลุ่ม';
     }
-  } catch (e) { /* ไม่มีสิทธิ์ส่งข้อความ — ข้ามได้ */ }
+  } catch (e) { sentTo = 'ERR:' + (e.message || e); }
+  const note = document.createElement('p');
+  note.style.cssText = 'font-size:13px;color:var(--mut);margin-top:10px';
+  note.textContent = sentTo === 'กลุ่ม' ? '💬 ส่งสรุปเข้ากลุ่มแล้ว'
+    : sentTo === 'แชทส่วนตัว' ? '💬 ส่งสรุปเข้าแชทแล้ว — ถ้าต้องการให้ทีมเห็น ให้เปิดฟอร์มจากลิงก์ในกลุ่ม'
+    : sentTo.startsWith('ERR') ? '⚠️ ส่งสรุปเข้าแชทไม่สำเร็จ: ' + sentTo.slice(4)
+    : '';
+  if (note.textContent) $('doneInfo').appendChild(note);
+}
+
+function buildChatText(res) {
+  const s = res.summary, L = [
+    `📋 Daily Report ${res.reportId}`,
+    `📅 ${s.date}  📍 ${s.site}`,
+    `👷 ${s.headcount} คน: ${s.employees.join(', ')}`,
+    '', '🔧 งานวันนี้:'
+  ];
+  s.items.forEach(i => L.push(`• ${i.name} ${i.qty} ${i.unit} (${i.hours} ชม.)`));
+  if ((s.cumulative || []).length) {
+    L.push('', `📊 ยอดสะสม ${s.site}:`);
+    s.cumulative.forEach(c => L.push(`• ${c.name} ${c.qty} ${c.unit}`));
+  }
+  if (res.photoCount) L.push('', `🖼 รูปหน้างาน ${res.photoCount} รูป`);
+  if (res.pdfUrl) L.push(`📄 PDF: ${res.pdfUrl}`);
+  const t = L.join('\n');
+  return t.length > 4900 ? t.slice(0, 4890) + '\n…' : t;
 }
 
 function showErr(t) { const m = $('msg'); m.textContent = t; m.className = 'msg err'; window.scrollTo({ top: 0, behavior: 'smooth' }); }
