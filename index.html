@@ -46,6 +46,13 @@
   .combo-list .opt small { color:var(--mut); }
   .combo-list .none { padding:12px; color:var(--mut); }
   .t-search.ok { border-color:var(--pri); background:#f4fdf7; }
+  .photos { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:10px; }
+  .photos:empty { display:none; }
+  .ph { position:relative; aspect-ratio:1; border-radius:8px; overflow:hidden; background:#eef1f4; }
+  .ph img { width:100%; height:100%; object-fit:cover; display:block; }
+  .ph button { position:absolute; top:4px; right:4px; width:26px; height:26px; border-radius:50%; border:0; background:rgba(0,0,0,.6); color:#fff; font-size:15px; }
+  .pdf-btn { display:block; text-align:center; padding:13px; margin:14px 0 4px; border-radius:10px; background:var(--dark); color:#fff; text-decoration:none; font-weight:700; }
+  .warn { background:#fff4e5; color:#8a4b00; padding:10px; border-radius:8px; margin-top:10px; font-size:14px; }
   .hidden { display:none !important; }
   table.sum { width:100%; border-collapse:collapse; font-size:14px; text-align:left; margin-top:10px; }
   table.sum td { padding:6px 4px; border-bottom:1px solid #eef1f4; }
@@ -80,6 +87,13 @@
     <label class="t">รายการงานที่ทำ</label>
     <div id="tasks"></div>
     <button class="btn-add" id="addTask" type="button">+ เพิ่มรายการงาน</button>
+  </div>
+
+  <div class="card">
+    <label class="t">รูปภาพหน้างาน <small style="font-weight:400;color:var(--mut)">(ไม่บังคับ สูงสุด 6 รูป)</small></label>
+    <div class="photos" id="photoGrid"></div>
+    <input type="file" id="photoInput" accept="image/*" multiple hidden>
+    <button class="btn-add" id="addPhoto" type="button">📷 ถ่ายรูป / เลือกรูป</button>
   </div>
 
   <div class="card">
@@ -161,6 +175,7 @@ function buildForm() {
   $('addTask').onclick = () => { addTaskRow(); saveDraft(); };
   ['workDate', 'site', 'note'].forEach(id => $(id).addEventListener('change', saveDraft));
   $('send').onclick = submit;
+  setupPhotos();
   $('again').onclick = () => location.reload();
 }
 
@@ -198,6 +213,48 @@ function addTaskRow(v) {
 }
 
 function selectedEmpIds() { return [...$('empList').querySelectorAll('input:checked')].map(i => i.value); }
+
+/* ---------- รูปภาพ: ย่อเป็น JPEG ด้านยาวไม่เกิน 1600px ก่อนส่ง ---------- */
+const MAX_PHOTOS = 6, MAX_SIDE = 1600;
+let photos = [];   // [{ type, data(base64), url(preview) }]
+
+function resizeImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      const dataUrl = c.toDataURL('image/jpeg', 0.8);
+      resolve({ type: 'image/jpeg', data: dataUrl.split(',')[1], url: dataUrl });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('อ่านรูปไม่ได้: ' + file.name)); };
+    img.src = url;
+  });
+}
+function renderPhotos() {
+  $('photoGrid').innerHTML = photos.map((p, i) =>
+    `<div class="ph"><img src="${p.url}" alt="รูปที่ ${i + 1}"><button type="button" data-i="${i}" title="ลบ">×</button></div>`).join('');
+  $('addPhoto').classList.toggle('hidden', photos.length >= MAX_PHOTOS);
+}
+function setupPhotos() {
+  $('addPhoto').onclick = () => $('photoInput').click();
+  $('photoInput').onchange = async e => {
+    const picked = [...e.target.files], files = picked.slice(0, MAX_PHOTOS - photos.length);
+    e.target.value = '';
+    for (const f of files) {
+      try { photos.push(await resizeImage(f)); } catch (err) { showErr(err.message); }
+    }
+    if (picked.length > files.length) showErr(`แนบได้สูงสุด ${MAX_PHOTOS} รูป`);
+    renderPhotos();
+  };
+  $('photoGrid').onclick = e => {
+    const b = e.target.closest('button[data-i]'); if (!b) return;
+    photos.splice(Number(b.dataset.i), 1); renderPhotos();
+  };
+}
 
 /* ---------- ช่องเลือกงานแบบพิมพ์ค้นหา ---------- */
 const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -312,7 +369,8 @@ async function submit() {
   const err = validate(p);
   if (err) return showErr(err);
   p.clientReqId = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random());
-  $('send').disabled = true; $('send').textContent = 'กำลังส่ง…';
+  p.photos = photos.map(x => ({ type: x.type, data: x.data }));
+  $('send').disabled = true; $('send').textContent = 'กำลังส่งและสร้าง PDF… (ประมาณ 10–20 วินาที)';
   try {
     idToken = liff.getIDToken();
     const res = await api('submit', { payload: p });
@@ -335,14 +393,23 @@ async function showDone(res) {
   const s = res.summary;
   if (!s) { $('doneInfo').textContent = 'เลขที่ ' + res.reportId; return; }
   $('doneInfo').innerHTML = `<p>เลขที่ ${esc(res.reportId)}<br>${esc(s.date)} · ${esc(s.site)}<br>${s.headcount} คน: ${esc(s.employees.join(', '))}</p>
-    <table class="sum">${s.items.map(i => `<tr><td>${esc(i.name)}</td><td>${i.qty} ${esc(i.unit)}</td><td>${i.hours} ชม.</td></tr>`).join('')}</table>`;
+    <table class="sum">${s.items.map(i => `<tr><td>${esc(i.name)}</td><td>${i.qty} ${esc(i.unit)}</td><td>${i.hours} ชม.</td></tr>`).join('')}</table>
+    ${(s.cumulative || []).length ? `<p style="margin:14px 0 4px;font-weight:700">📊 ยอดสะสม ${esc(s.site)}</p>
+    <table class="sum">${s.cumulative.map(c => `<tr><td>${esc(c.name)}</td><td>${c.qty} ${esc(c.unit)}</td></tr>`).join('')}</table>` : ''}
+    ${res.photoCount ? `<p style="color:var(--mut);font-size:14px">🖼 แนบรูป ${res.photoCount} รูป</p>` : ''}
+    ${res.pdfUrl ? `<a class="pdf-btn" href="${esc(res.pdfUrl)}" target="_blank" rel="noopener">📄 เปิด PDF Daily Report</a>` : ''}
+    ${res.warning ? `<div class="warn">${esc(res.warning)}</div>` : ''}`;
+  $('doneInfo').querySelector('.pdf-btn')?.addEventListener('click', e => {
+    try { if (liff.isInClient()) { e.preventDefault(); liff.openWindow({ url: res.pdfUrl, external: true }); } } catch (err) {}
+  });
   // ส่งสรุปเข้าแชท (ทำงานเมื่อเปิดจากห้องแชทและเปิด scope chat_message.write)
   try {
     const ctx = liff.getContext();
     if (ctx && ['utou', 'group', 'room'].includes(ctx.type)) {
       await liff.sendMessages([{ type: 'text', text:
         `📋 รายงาน ${s.date}\n📍 ${s.site}\n👷 ${s.employees.join(', ')}\n` +
-        s.items.map(i => `• ${i.name} ${i.qty} ${i.unit} / ${i.hours} ชม.`).join('\n') }]);
+        s.items.map(i => `• ${i.name} ${i.qty} ${i.unit} / ${i.hours} ชม.`).join('\n') +
+        (res.pdfUrl ? `\n📄 ${res.pdfUrl}` : '') }]);
     }
   } catch (e) { /* ไม่มีสิทธิ์ส่งข้อความ — ข้ามได้ */ }
 }
