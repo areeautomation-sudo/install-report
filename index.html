@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>รายงานงานติดตั้ง</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root { --pri:#06c755; --dark:#1f4e78; --bg:#f3f5f8; --card:#fff; --txt:#1c2733; --mut:#6b7785; --err:#d93025; --bd:#dde3ea; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:'Sarabun',sans-serif; background:var(--bg); color:var(--txt); font-size:16px; }
+  header { background:var(--dark); color:#fff; padding:14px 16px; position:sticky; top:0; z-index:5; }
+  header h1 { margin:0; font-size:18px; } header small { opacity:.8; }
+  main { padding:12px 16px 110px; max-width:640px; margin:auto; }
+  .card { background:var(--card); border-radius:12px; padding:14px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  label.t { display:block; font-weight:700; margin-bottom:6px; }
+  input, select, textarea { width:100%; padding:11px 12px; border:1px solid var(--bd); border-radius:8px; font:inherit; background:#fff; }
+  input:focus, select:focus, textarea:focus { outline:2px solid var(--pri); border-color:transparent; }
+  .emp-list { max-height:240px; overflow:auto; border:1px solid var(--bd); border-radius:8px; margin-top:8px; }
+  .emp-list label { display:flex; gap:10px; align-items:center; padding:10px 12px; border-bottom:1px solid #eef1f4; }
+  .emp-list label:last-child { border-bottom:0; }
+  .emp-list input { width:20px; height:20px; accent-color:var(--pri); }
+  .emp-list small { color:var(--mut); margin-left:auto; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .chip { background:#e7f8ee; color:#067a36; padding:4px 10px; border-radius:20px; font-size:14px; }
+  .task { border:1px solid var(--bd); border-radius:10px; padding:10px; margin-bottom:10px; position:relative; }
+  .task .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+  .task .row span { font-size:13px; color:var(--mut); display:block; margin-bottom:3px; }
+  .task .per { font-size:13px; color:#067a36; margin-top:6px; min-height:18px; }
+  .del { position:absolute; top:-9px; right:-9px; width:28px; height:28px; border-radius:50%; border:0; background:var(--err); color:#fff; font-size:16px; }
+  .btn-add { width:100%; padding:11px; border:2px dashed var(--pri); background:#fff; color:var(--pri); border-radius:10px; font:inherit; font-weight:700; }
+  footer { position:fixed; bottom:0; left:0; right:0; background:#fff; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); box-shadow:0 -2px 8px rgba(0,0,0,.08); }
+  .btn-send { width:100%; max-width:640px; display:block; margin:auto; padding:14px; border:0; border-radius:10px; background:var(--pri); color:#fff; font:inherit; font-size:18px; font-weight:700; }
+  .btn-send:disabled { opacity:.5; }
+  .msg { padding:12px; border-radius:8px; margin-bottom:12px; display:none; }
+  .msg.err { background:#fdecea; color:var(--err); display:block; }
+  #loading, #done { text-align:center; padding:60px 20px; }
+  .spin { width:40px; height:40px; border:4px solid #ddd; border-top-color:var(--pri); border-radius:50%; animation:s 1s linear infinite; margin:0 auto 12px; }
+  @keyframes s { to { transform:rotate(360deg); } }
+  .hidden { display:none !important; }
+  table.sum { width:100%; border-collapse:collapse; font-size:14px; text-align:left; margin-top:10px; }
+  table.sum td { padding:6px 4px; border-bottom:1px solid #eef1f4; }
+</style>
+</head>
+<body>
+<header><h1>📋 รายงานงานติดตั้งรายวัน</h1><small id="who">กำลังเชื่อมต่อ LINE…</small></header>
+
+<div id="loading"><div class="spin"></div>กำลังโหลดข้อมูล…</div>
+
+<main id="form" class="hidden">
+  <div id="msg" class="msg"></div>
+
+  <div class="card">
+    <label class="t">วันที่ทำงาน</label>
+    <input type="date" id="workDate">
+  </div>
+
+  <div class="card">
+    <label class="t">Site งาน</label>
+    <select id="site"><option value="">— เลือก Site —</option></select>
+  </div>
+
+  <div class="card">
+    <label class="t">พนักงานที่ทำงาน (เลือกได้หลายคน)</label>
+    <input type="search" id="empSearch" placeholder="🔍 ค้นหาชื่อ">
+    <div class="emp-list" id="empList"></div>
+    <div class="chips" id="empChips"></div>
+  </div>
+
+  <div class="card">
+    <label class="t">รายการงานที่ทำ</label>
+    <div id="tasks"></div>
+    <button class="btn-add" id="addTask" type="button">+ เพิ่มรายการงาน</button>
+  </div>
+
+  <div class="card">
+    <label class="t">หมายเหตุ (ถ้ามี)</label>
+    <textarea id="note" rows="2" maxlength="500" placeholder="เช่น ปัญหาหน้างาน, รอวัสดุ"></textarea>
+  </div>
+</main>
+
+<div id="done" class="hidden">
+  <div style="font-size:56px">✅</div>
+  <h2>บันทึกเรียบร้อย</h2>
+  <div id="doneInfo"></div>
+  <p><button class="btn-send" id="again" type="button">ส่งรายงานใหม่</button></p>
+</div>
+
+<footer id="foot" class="hidden"><button class="btn-send" id="send" type="button">ส่งรายงาน</button></footer>
+
+<script>
+/* ============ ตั้งค่า ============ */
+const LIFF_ID = '2011758041-R0zlVvGW'; // ← ใส่ LIFF ID หลังสร้าง LIFF app
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyk9W0qm6sUx3CuGofqb63W9IEuan2M_c-JrptyD623M9lr3Qv0RnWxmaZ5y_KNwNzJFA/exec';
+/* ================================= */
+
+const DRAFT_KEY = 'install_report_draft_v1';
+let idToken = '', master = { sites: [], employees: [], tasks: [] };
+const $ = id => document.getElementById(id);
+
+async function api(action, extra) {
+  const r = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // ไม่เกิด CORS preflight
+    body: JSON.stringify(Object.assign({ action, idToken }, extra || {}))
+  });
+  return r.json();
+}
+
+function todayStr() {
+  const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+
+async function init() {
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) { liff.login(); return; }
+    idToken = liff.getIDToken();
+    const res = await api('master');
+    if (!res.ok) {
+      if (res.code === 'AUTH') { liff.logout(); liff.login(); return; }
+      showFatal(res.error + (res.userId ? '<br><br>UserID:<br><code>' + res.userId + '</code>' : ''));
+      return;
+    }
+    master = res.data;
+    $('who').textContent = 'ผู้รายงาน: ' + (res.user.name || '-');
+    buildForm();
+    restoreDraft();
+    $('loading').classList.add('hidden');
+    $('form').classList.remove('hidden');
+    $('foot').classList.remove('hidden');
+  } catch (e) {
+    showFatal('เชื่อมต่อไม่สำเร็จ: ' + e.message);
+  }
+}
+
+function showFatal(html) { $('loading').innerHTML = '<div style="font-size:40px">⚠️</div>' + html; }
+
+function buildForm() {
+  $('workDate').value = todayStr();
+  $('workDate').max = todayStr();
+  master.sites.forEach(s => $('site').add(new Option(s.name, s.id)));
+  $('empList').innerHTML = master.employees.map(e =>
+    `<label data-name="${esc(e.name).toLowerCase()}"><input type="checkbox" value="${esc(e.id)}"> ${esc(e.name)} <small>${esc(e.position)}</small></label>`
+  ).join('');
+  $('empList').addEventListener('change', () => { renderChips(); updatePer(); saveDraft(); });
+  $('empSearch').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    $('empList').querySelectorAll('label').forEach(l => l.classList.toggle('hidden', q && !l.dataset.name.includes(q)));
+  });
+  $('addTask').onclick = () => { addTaskRow(); saveDraft(); };
+  ['workDate', 'site', 'note'].forEach(id => $(id).addEventListener('change', saveDraft));
+  $('send').onclick = submit;
+  $('again').onclick = () => location.reload();
+}
+
+function taskOptions(selected) {
+  const groups = {};
+  master.tasks.forEach(t => (groups[t.category] = groups[t.category] || []).push(t));
+  return '<option value="">— เลือกงาน —</option>' + Object.keys(groups).map(g =>
+    `<optgroup label="${esc(g)}">` + groups[g].map(t =>
+      `<option value="${esc(t.id)}" ${t.id === selected ? 'selected' : ''}>${esc(t.name)} (${esc(t.unit)})</option>`).join('') + '</optgroup>'
+  ).join('');
+}
+
+function addTaskRow(v) {
+  v = v || {};
+  const div = document.createElement('div');
+  div.className = 'task';
+  div.innerHTML = `
+    <button class="del" type="button" title="ลบ">×</button>
+    <select class="t-id">${taskOptions(v.taskId)}</select>
+    <div class="row">
+      <div><span class="unit">จำนวน</span><input class="t-qty" type="number" inputmode="decimal" min="0" step="any" value="${v.qty || ''}"></div>
+      <div><span>ชั่วโมงที่ทีมใช้กับงานนี้</span><input class="t-hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="${v.hours || ''}"></div>
+    </div>
+    <div class="per"></div>`;
+  div.querySelector('.del').onclick = () => { div.remove(); saveDraft(); };
+  div.addEventListener('input', () => { updatePer(); saveDraft(); });
+  div.addEventListener('change', () => { updatePer(); saveDraft(); });
+  $('tasks').appendChild(div);
+  updatePer();
+}
+
+function selectedEmpIds() { return [...$('empList').querySelectorAll('input:checked')].map(i => i.value); }
+
+function renderChips() {
+  const ids = new Set(selectedEmpIds());
+  $('empChips').innerHTML = master.employees.filter(e => ids.has(e.id))
+    .map(e => `<span class="chip">${esc(e.name)}</span>`).join('') +
+    (ids.size ? `<span class="chip" style="background:#1f4e78;color:#fff">${ids.size} คน</span>` : '');
+}
+
+function updatePer() {
+  const n = selectedEmpIds().length;
+  document.querySelectorAll('.task').forEach(div => {
+    const t = master.tasks.find(x => x.id === div.querySelector('.t-id').value);
+    div.querySelector('.unit').textContent = 'จำนวน' + (t ? ` (${t.unit})` : '');
+    const q = parseFloat(div.querySelector('.t-qty').value);
+    div.querySelector('.per').textContent = (t && q > 0 && n > 0)
+      ? `≈ คนละ ${(q / n).toLocaleString('th-TH', { maximumFractionDigits: 2 })} ${t.unit} (${n} คน)` : '';
+  });
+}
+
+function collect() {
+  return {
+    workDate: $('workDate').value,
+    siteId: $('site').value,
+    empIds: selectedEmpIds(),
+    items: [...document.querySelectorAll('.task')].map(d => ({
+      taskId: d.querySelector('.t-id').value,
+      qty: d.querySelector('.t-qty').value,
+      hours: d.querySelector('.t-hrs').value
+    })),
+    note: $('note').value.trim()
+  };
+}
+
+function validate(p) {
+  if (!p.workDate) return 'กรุณาเลือกวันที่';
+  if (!p.siteId) return 'กรุณาเลือก Site งาน';
+  if (!p.empIds.length) return 'กรุณาเลือกพนักงานอย่างน้อย 1 คน';
+  if (!p.items.length) return 'กรุณาเพิ่มรายการงาน';
+  const ids = new Set();
+  for (let i = 0; i < p.items.length; i++) {
+    const it = p.items[i], n = i + 1;
+    if (!it.taskId) return `รายการที่ ${n}: ยังไม่เลือกงาน`;
+    if (ids.has(it.taskId)) return `รายการที่ ${n}: งานซ้ำกับรายการก่อนหน้า`;
+    ids.add(it.taskId);
+    if (!(parseFloat(it.qty) > 0)) return `รายการที่ ${n}: จำนวนต้องมากกว่า 0`;
+    const h = parseFloat(it.hours);
+    if (!(h > 0 && h <= 24)) return `รายการที่ ${n}: ชั่วโมงต้องอยู่ระหว่าง 0–24`;
+  }
+  return '';
+}
+
+async function submit() {
+  const p = collect();
+  const err = validate(p);
+  if (err) return showErr(err);
+  p.clientReqId = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random());
+  $('send').disabled = true; $('send').textContent = 'กำลังส่ง…';
+  try {
+    idToken = liff.getIDToken();
+    const res = await api('submit', { payload: p });
+    if (!res.ok) {
+      if (res.code === 'AUTH') { saveDraft(); showErr('Session หมดอายุ กำลังเข้าสู่ระบบใหม่ (ข้อมูลที่กรอกถูกเก็บไว้)'); setTimeout(() => { liff.logout(); liff.login(); }, 1500); return; }
+      return showErr(res.error);
+    }
+    clearDraft();
+    showDone(res);
+  } catch (e) {
+    saveDraft();
+    showErr('ส่งไม่สำเร็จ: ' + e.message + ' (ข้อมูลที่กรอกถูกเก็บไว้ ลองกดส่งใหม่)');
+  } finally {
+    $('send').disabled = false; $('send').textContent = 'ส่งรายงาน';
+  }
+}
+
+async function showDone(res) {
+  $('form').classList.add('hidden'); $('foot').classList.add('hidden'); $('done').classList.remove('hidden');
+  const s = res.summary;
+  if (!s) { $('doneInfo').textContent = 'เลขที่ ' + res.reportId; return; }
+  $('doneInfo').innerHTML = `<p>เลขที่ ${esc(res.reportId)}<br>${esc(s.date)} · ${esc(s.site)}<br>${s.headcount} คน: ${esc(s.employees.join(', '))}</p>
+    <table class="sum">${s.items.map(i => `<tr><td>${esc(i.name)}</td><td>${i.qty} ${esc(i.unit)}</td><td>${i.hours} ชม.</td></tr>`).join('')}</table>`;
+  // ส่งสรุปเข้าแชท (ทำงานเมื่อเปิดจากห้องแชทและเปิด scope chat_message.write)
+  try {
+    const ctx = liff.getContext();
+    if (ctx && ['utou', 'group', 'room'].includes(ctx.type)) {
+      await liff.sendMessages([{ type: 'text', text:
+        `📋 รายงาน ${s.date}\n📍 ${s.site}\n👷 ${s.employees.join(', ')}\n` +
+        s.items.map(i => `• ${i.name} ${i.qty} ${i.unit} / ${i.hours} ชม.`).join('\n') }]);
+    }
+  } catch (e) { /* ไม่มีสิทธิ์ส่งข้อความ — ข้ามได้ */ }
+}
+
+function showErr(t) { const m = $('msg'); m.textContent = t; m.className = 'msg err'; window.scrollTo({ top: 0, behavior: 'smooth' }); }
+
+/* ---------- Draft (กันข้อมูลหายเมื่อสัญญาณหลุด) ---------- */
+function saveDraft() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(collect())); } catch (e) {} }
+function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+function restoreDraft() {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) {}
+  if (!d) { addTaskRow(); return; }
+  if (d.workDate) $('workDate').value = d.workDate;
+  if (d.siteId) $('site').value = d.siteId;
+  (d.empIds || []).forEach(id => { const cb = $('empList').querySelector(`input[value="${CSS.escape(id)}"]`); if (cb) cb.checked = true; });
+  (d.items && d.items.length ? d.items : [{}]).forEach(addTaskRow);
+  $('note').value = d.note || '';
+  renderChips(); updatePer();
+}
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+init();
+</script>
+</body>
+</html>
