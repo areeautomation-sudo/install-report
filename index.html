@@ -467,13 +467,15 @@ function validate(p) {
   return '';
 }
 
-/* คำเตือน (ส่งต่อได้หลังกดยืนยัน): ชั่วโมงรวมต่อคนเกิน 8 ชม. / มีคนที่ไม่ได้อยู่ในงานไหนเลย */
+/* คำเตือน (ส่งต่อได้หลังกดยืนยัน): ชั่วโมงรวมต่อคนเกิน/ไม่ครบ 8 ชม. / มีคนที่ไม่ได้อยู่ในงานไหนเลย */
 const MAX_DAY_HOURS = 8;
 function warnings(p) {
   const hrs = {}, W = [];
   p.items.forEach(it => it.empIds.forEach(id => { hrs[id] = (hrs[id] || 0) + (parseFloat(it.hours) || 0); }));
   const over = p.empIds.filter(id => hrs[id] > MAX_DAY_HOURS);
-  if (over.length) W.push(`⏱ ชั่วโมงรวมเกิน ${MAX_DAY_HOURS} ชม./วัน:\n` + over.map(id => `• ${empName(id)} ${hrs[id]} ชม.`).join('\n'));
+  if (over.length) W.push(`⏱ เกิน ${MAX_DAY_HOURS} ชม. — ทำ OT จริงหรือไม่?\n` + over.map(id => `• ${empName(id)} ${hrs[id]} ชม.`).join('\n'));
+  const under = p.empIds.filter(id => hrs[id] > 0 && hrs[id] < MAX_DAY_HOURS);
+  if (under.length) W.push(`⏳ ไม่ครบ ${MAX_DAY_HOURS} ชม. — ทำครึ่งวัน/ลาหรือไม่?\n` + under.map(id => `• ${empName(id)} ${hrs[id]} ชม.`).join('\n'));
   const idle = p.empIds.filter(id => !hrs[id]);
   if (idle.length) W.push('👤 ไม่ได้อยู่ในงานไหนเลย: ' + idle.map(empName).join(', '));
   return W;
@@ -481,7 +483,7 @@ function warnings(p) {
 let warnAck = '';
 function showWarn(list) {
   const m = $('msg');
-  m.textContent = '⚠️ ตรวจสอบก่อนส่ง\n\n' + list.join('\n\n') + '\n\nถ้าถูกต้องแล้ว กด "ยืนยันส่ง" อีกครั้ง / ถ้าไม่ถูก แก้ไขแล้วกดส่งใหม่';
+  m.textContent = '⚠️ ตรวจสอบก่อนส่ง\n\n' + list.join('\n\n') + '\n\n✔ ถ้าถูกต้องแล้ว (เช่น ทำ OT / ทำครึ่งวันจริง) กด "ยืนยันส่ง" ได้เลย\n✎ ถ้าไม่ถูก แก้ไขแล้วกดส่งใหม่';
   m.className = 'msg warn';
   $('send').textContent = 'ยืนยันส่ง (มีคำเตือน)';
   window.scrollTo({ top: 0, behavior: 'smooth' });
