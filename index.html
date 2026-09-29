@@ -28,6 +28,14 @@
   .task .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
   .task .row span { font-size:13px; color:var(--mut); display:block; margin-bottom:3px; }
   .task .per { font-size:13px; color:#067a36; margin-top:6px; min-height:18px; }
+  .crew-wrap { margin-top:8px; }
+  .crew-wrap > span { font-size:13px; color:var(--mut); display:block; margin-bottom:4px; }
+  .crew { display:flex; flex-wrap:wrap; gap:6px; }
+  .crew:empty::before { content:'เลือกพนักงานด้านบนก่อน'; font-size:13px; color:var(--mut); }
+  .crew button { border:1px solid var(--bd); background:#fff; color:var(--mut); border-radius:20px; padding:6px 12px; font:inherit; font-size:14px; }
+  .crew button.on { background:#e7f8ee; border-color:var(--pri); color:#067a36; font-weight:600; }
+  .crew button.on::before { content:'✓ '; }
+  .msg.warn { background:#fff4dc; color:#6b4a00; display:block; white-space:pre-line; }
   .del { position:absolute; top:-9px; right:-9px; width:28px; height:28px; border-radius:50%; border:0; background:var(--err); color:#fff; font-size:16px; }
   .btn-add { width:100%; padding:11px; border:2px dashed var(--pri); background:#fff; color:var(--pri); border-radius:10px; font:inherit; font-weight:700; }
   footer { position:fixed; bottom:0; left:0; right:0; background:#fff; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); box-shadow:0 -2px 8px rgba(0,0,0,.08); }
@@ -234,18 +242,35 @@ function addTaskRow(v) {
     </div>
     <div class="row">
       <div><span class="unit">จำนวน</span><input class="t-qty" type="number" inputmode="decimal" min="0" step="any" value="${v.qty || ''}"></div>
-      <div><span>ชั่วโมงที่ทีมใช้กับงานนี้</span><input class="t-hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="${v.hours || ''}"></div>
+      <div><span>ชั่วโมงที่ใช้ (ต่อคน)</span><input class="t-hrs" type="number" inputmode="decimal" min="0" max="24" step="0.5" value="${v.hours || ''}"></div>
     </div>
+    <div class="crew-wrap"><span>ผู้ทำงานนี้ (แตะชื่อเพื่อเอาออก/ใส่กลับ)</span><div class="crew"></div></div>
     <div class="per"></div>`;
+  div.dataset.off = JSON.stringify(v.off || []);   // เก็บ "คนที่เอาออก" → คนที่เพิ่มทีหลังจะถูกเลือกให้อัตโนมัติ
+  div.querySelector('.crew').onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const off = new Set(JSON.parse(div.dataset.off));
+    off.has(b.dataset.id) ? off.delete(b.dataset.id) : off.add(b.dataset.id);
+    div.dataset.off = JSON.stringify([...off]);
+    renderCrew(div); updatePer(); saveDraft();
+  };
   div.querySelector('.del').onclick = () => { div.remove(); saveDraft(); };
   div.addEventListener('input', () => { updatePer(); saveDraft(); });
   div.addEventListener('change', () => { updatePer(); saveDraft(); });
   setupCombo(div, v.taskId);
   $('tasks').appendChild(div);
+  renderCrew(div);
   updatePer();
 }
 
 function selectedEmpIds() { return [...$('empList').querySelectorAll('input:checked')].map(i => i.value); }
+function empName(id) { const e = master.employees.find(x => x.id === id); return e ? e.name : id; }
+function crewIds(div) { const off = new Set(JSON.parse(div.dataset.off || '[]')); return selectedEmpIds().filter(id => !off.has(id)); }
+function renderCrew(div) {
+  const off = new Set(JSON.parse(div.dataset.off || '[]'));
+  div.querySelector('.crew').innerHTML = selectedEmpIds().map(id =>
+    `<button type="button" data-id="${esc(id)}" class="${off.has(id) ? '' : 'on'}">${esc(empName(id))}</button>`).join('');
+}
 
 /* ---------- รูปภาพ: ย่อเป็น JPEG ด้านยาวไม่เกิน 1600px ก่อนส่ง ---------- */
 const MAX_PHOTOS = 6, MAX_SIDE = 1600;
@@ -386,11 +411,12 @@ function renderChips() {
   $('empChips').innerHTML = master.employees.filter(e => ids.has(e.id))
     .map(e => `<span class="chip">${esc(e.name)}</span>`).join('') +
     (ids.size ? `<span class="chip" style="background:#1f4e78;color:#fff">${ids.size} คน</span>` : '');
+  document.querySelectorAll('.task').forEach(renderCrew);
 }
 
 function updatePer() {
-  const n = selectedEmpIds().length;
   document.querySelectorAll('.task').forEach(div => {
+    const n = crewIds(div).length;
     const t = master.tasks.find(x => x.id === div.querySelector('.t-id').value);
     div.querySelector('.unit').textContent = 'จำนวน' + (t ? ` (${t.unit})` : '');
     const q = parseFloat(div.querySelector('.t-qty').value);
@@ -407,7 +433,9 @@ function collect() {
     items: [...document.querySelectorAll('.task')].map(d => ({
       taskId: d.querySelector('.t-id').value,
       qty: d.querySelector('.t-qty').value,
-      hours: d.querySelector('.t-hrs').value
+      hours: d.querySelector('.t-hrs').value,
+      empIds: crewIds(d),
+      off: JSON.parse(d.dataset.off || '[]')
     })),
     note: $('note').value.trim(),
     weatherAM: wxVal('wxAM'),
@@ -434,14 +462,39 @@ function validate(p) {
     if (!(parseFloat(it.qty) > 0)) return `รายการที่ ${n}: จำนวนต้องมากกว่า 0`;
     const h = parseFloat(it.hours);
     if (!(h > 0 && h <= 24)) return `รายการที่ ${n}: ชั่วโมงต้องอยู่ระหว่าง 0–24`;
+    if (!it.empIds.length) return `รายการที่ ${n}: ต้องมีผู้ทำงานนี้อย่างน้อย 1 คน`;
   }
   return '';
+}
+
+/* คำเตือน (ส่งต่อได้หลังกดยืนยัน): ชั่วโมงรวมต่อคนเกิน 8 ชม. / มีคนที่ไม่ได้อยู่ในงานไหนเลย */
+const MAX_DAY_HOURS = 8;
+function warnings(p) {
+  const hrs = {}, W = [];
+  p.items.forEach(it => it.empIds.forEach(id => { hrs[id] = (hrs[id] || 0) + (parseFloat(it.hours) || 0); }));
+  const over = p.empIds.filter(id => hrs[id] > MAX_DAY_HOURS);
+  if (over.length) W.push(`⏱ ชั่วโมงรวมเกิน ${MAX_DAY_HOURS} ชม./วัน:\n` + over.map(id => `• ${empName(id)} ${hrs[id]} ชม.`).join('\n'));
+  const idle = p.empIds.filter(id => !hrs[id]);
+  if (idle.length) W.push('👤 ไม่ได้อยู่ในงานไหนเลย: ' + idle.map(empName).join(', '));
+  return W;
+}
+let warnAck = '';
+function showWarn(list) {
+  const m = $('msg');
+  m.textContent = '⚠️ ตรวจสอบก่อนส่ง\n\n' + list.join('\n\n') + '\n\nถ้าถูกต้องแล้ว กด "ยืนยันส่ง" อีกครั้ง / ถ้าไม่ถูก แก้ไขแล้วกดส่งใหม่';
+  m.className = 'msg warn';
+  $('send').textContent = 'ยืนยันส่ง (มีคำเตือน)';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function submit() {
   const p = collect();
   const err = validate(p);
   if (err) return showErr(err);
+  const W = warnings(p), key = JSON.stringify(W);
+  if (W.length && warnAck !== key) { warnAck = key; return showWarn(W); }
+  warnAck = '';
+  $('msg').className = 'msg';
   p.clientReqId = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random());
   p.photos = photos.map(x => ({ type: x.type, data: x.data }));
   $('send').disabled = true; $('send').textContent = 'กำลังส่งและสร้าง PDF… (ประมาณ 10–20 วินาที)';
@@ -467,7 +520,7 @@ async function showDone(res) {
   const s = res.summary;
   if (!s) { $('doneInfo').textContent = 'เลขที่ ' + res.reportId; return; }
   $('doneInfo').innerHTML = `<p>เลขที่ ${esc(res.reportId)}<br>${esc(s.date)} · ${esc(s.site)}<br>${s.headcount} คน: ${esc(s.employees.join(', '))}</p>
-    <table class="sum">${s.items.map(i => `<tr><td>${esc(i.name)}</td><td>${i.qty} ${esc(i.unit)}</td><td>${i.hours} ชม.</td></tr>`).join('')}</table>
+    <table class="sum">${s.items.map(i => `<tr><td>${esc(i.name)}${i.crewNames && i.crew < s.headcount ? `<br><small style="color:var(--mut)">${esc(i.crewNames.join(', '))}</small>` : ''}</td><td>${i.qty} ${esc(i.unit)}</td><td>${i.crew || s.headcount} คน · ${i.hours} ชม.</td></tr>`).join('')}</table>
     ${(s.cumulative || []).length ? `<p style="margin:14px 0 4px;font-weight:700">📊 ยอดสะสม ${esc(s.site)}</p>
     <table class="sum">${s.cumulative.map(c => `<tr><td>${esc(c.name)}</td><td>${c.qty} ${esc(c.unit)}</td></tr>`).join('')}</table>` : ''}
     ${res.photoCount ? `<p style="color:var(--mut);font-size:14px">🖼 แนบรูป ${res.photoCount} รูป</p>` : ''}
@@ -502,7 +555,8 @@ function buildChatText(res) {
     `👷 ${s.headcount} คน: ${s.employees.join(', ')}`,
     '', '🔧 งานวันนี้:'
   ];
-  s.items.forEach(i => L.push(`• ${i.name} ${i.qty} ${i.unit} (${i.hours} ชม.)`));
+  s.items.forEach(i => L.push(`• ${i.name} ${i.qty} ${i.unit} (${i.crew || s.headcount} คน · ${i.hours} ชม.)` +
+    (i.crewNames && i.crew < s.headcount ? `\n   ผู้ทำ: ${i.crewNames.join(', ')}` : '')));
   if ((s.cumulative || []).length) {
     L.push('', `📊 ยอดสะสม ${s.site}:`);
     s.cumulative.forEach(c => L.push(`• ${c.name} ${c.qty} ${c.unit}`));
@@ -535,7 +589,8 @@ function buildFlex(res) {
     T(`👷 ${s.headcount} คน: ${s.employees.join(', ')}`, { color: '#4a5968' }),
     { type: 'separator', margin: 'md' },
     section('🔧 งานวันนี้', '#1f4e78'),
-    ...clip(s.items, i => row(i.name, `${i.qty} ${i.unit}`, `${i.hours} ชม.`))
+    ...clip(s.items, i => row(i.crewNames && i.crew < s.headcount ? `${i.name}\n👷 ${i.crewNames.join(', ')}` : i.name,
+      `${i.qty} ${i.unit}`, `${i.crew || s.headcount}คน ${i.hours}ชม.`))
   ];
   if ((s.cumulative || []).length) {
     body.push({ type: 'separator', margin: 'lg' }, section(`📊 ยอดสะสม ${s.site}`, '#067a36'),
