@@ -98,14 +98,11 @@
   </div>
 
   <div class="card">
-    <label class="t">สภาพอากาศวันนี้</label>
+    <label class="t">สภาพอากาศวันนี้ <small style="font-weight:400;color:var(--mut)">(ถ้ามี)</small></label>
     <div class="wx-label">ช่วงเช้า</div>
     <div class="chips-sel" id="wxAM"></div>
     <div class="wx-label">ช่วงบ่าย</div>
     <div class="chips-sel" id="wxPM"></div>
-    <div class="row2">
-      <div><span class="sub">หยุดงานเพราะฝน (ชม.)</span><input id="rainStop" type="number" inputmode="decimal" min="0" max="12" step="0.5" value="0"></div>
-    </div>
   </div>
 
   <div class="card">
@@ -211,7 +208,7 @@ function buildForm() {
   setupPhotos();
   setupWeather();
   $('addIssue').onclick = () => { addIssueRow(); saveDraft(); };
-  ['rainStop', 'plan', 'planMan'].forEach(id => $(id).addEventListener('change', saveDraft));
+  ['plan', 'planMan'].forEach(id => $(id).addEventListener('change', saveDraft));
   $('again').onclick = () => location.reload();
 }
 
@@ -293,7 +290,7 @@ function setupPhotos() {
 }
 
 /* ---------- สภาพอากาศ / ปัญหา ---------- */
-const WX_OPTS = ['แดดจัด', 'มีเมฆ', 'ฝนเล็กน้อย', 'ฝนตกหนัก', 'ฝนฟ้าคะนอง'];
+const WX_OPTS = ['แดดจัด', 'มีเมฆ', 'ฝนตก 1 ชม.', 'ฝนตก 2 ชม.', 'ฝนตก 3 ชม.', 'ฝนตก 4 ชม.'];
 const ISSUE_CATS = ['รอวัสดุ', 'สภาพอากาศ', 'แบบ/ข้อมูลไม่ชัด', 'หน้างานไม่พร้อม', 'เครื่องมือ/อุปกรณ์', 'กำลังคน', 'อื่น ๆ'];
 const MAX_ISSUES = 5;
 
@@ -415,7 +412,6 @@ function collect() {
     note: $('note').value.trim(),
     weatherAM: wxVal('wxAM'),
     weatherPM: wxVal('wxPM'),
-    rainStopHours: $('rainStop').value,
     issues: [...document.querySelectorAll('.issue')].map(d => ({
       cat: d.querySelector('.i-cat').value, text: d.querySelector('.i-text').value.trim()
     })).filter(i => i.text),
@@ -439,9 +435,6 @@ function validate(p) {
     const h = parseFloat(it.hours);
     if (!(h > 0 && h <= 24)) return `รายการที่ ${n}: ชั่วโมงต้องอยู่ระหว่าง 0–24`;
   }
-  if (!p.weatherAM || !p.weatherPM) return 'กรุณาเลือกสภาพอากาศช่วงเช้าและช่วงบ่าย';
-  const rs = parseFloat(p.rainStopHours || 0);
-  if (!(rs >= 0 && rs <= 12)) return 'ชั่วโมงหยุดเพราะฝนต้องอยู่ระหว่าง 0–12';
   return '';
 }
 
@@ -583,7 +576,6 @@ function restoreDraft() {
   (d.items && d.items.length ? d.items : [{}]).forEach(addTaskRow);
   $('note').value = d.note || '';
   setWx('wxAM', d.weatherAM); setWx('wxPM', d.weatherPM);
-  $('rainStop').value = d.rainStopHours != null && d.rainStopHours !== '' ? d.rainStopHours : 0;
   (d.issues || []).forEach(addIssueRow);
   $('plan').value = d.planTomorrow || '';
   $('planMan').value = d.planManpower || '';
