@@ -571,22 +571,53 @@ async function showDone(res) {
     try { if (liff.isInClient()) { e.preventDefault(); liff.openWindow({ url: res.pdfUrl, external: true }); } } catch (err) {}
   });
   // ส่งสรุปเข้าแชท/กลุ่มที่เปิดฟอร์ม ในนามผู้ใช้ (ไม่ใช้โควตาข้อความของ OA) — ต้องเปิด scope chat_message.write
-  let sentTo = '';
+  // เปิดจากในกลุ่ม → ส่งอัตโนมัติ · เปิดจากที่อื่น (แชท OA / เบราว์เซอร์) → ปุ่มเลือกกลุ่มด้วย shareTargetPicker
+  let ctxType = 'none', result = '';
   try {
     const ctx = liff.getContext();
-    if (ctx && ['utou', 'group', 'room', 'square_chat'].includes(ctx.type)) {
-      try { await liff.sendMessages([buildFlex(res)]); }
-      catch (flexErr) { await liff.sendMessages([{ type: 'text', text: buildChatText(res) }]); }  // สำรอง: ข้อความธรรมดา
-      sentTo = ctx.type === 'utou' ? 'แชทส่วนตัว' : 'กลุ่ม';
-    }
-  } catch (e) { sentTo = 'ERR:' + (e.message || e); }
-  const note = document.createElement('p');
-  note.style.cssText = 'font-size:13px;color:var(--mut);margin-top:10px';
-  note.textContent = sentTo === 'กลุ่ม' ? '💬 ส่งสรุปเข้ากลุ่มแล้ว'
-    : sentTo === 'แชทส่วนตัว' ? '💬 ส่งสรุปเข้าแชทแล้ว — ถ้าต้องการให้ทีมเห็น ให้เปิดฟอร์มจากลิงก์ในกลุ่ม'
-    : sentTo.startsWith('ERR') ? '⚠️ ส่งสรุปเข้าแชทไม่สำเร็จ: ' + sentTo.slice(4)
-    : '';
-  if (note.textContent) $('doneInfo').appendChild(note);
+    ctxType = (ctx && ctx.type) || 'none';
+    if (['group', 'room', 'square_chat'].includes(ctxType)) {
+      try { await liff.sendMessages([buildFlex(res)]); result = 'flex-sent'; }
+      catch (flexErr) {
+        await liff.sendMessages([{ type: 'text', text: buildChatText(res) }]);   // สำรอง: ข้อความธรรมดา
+        result = 'text-sent (flex err: ' + (flexErr.code || '') + ' ' + (flexErr.message || flexErr) + ')';
+      }
+    } else result = 'not-group';
+  } catch (e) { result = 'ERR ' + (e.code || '') + ' ' + (e.message || e); }
+  logChat(res.reportId, ctxType, result);
+
+  const note = document.createElement('div');
+  note.style.cssText = 'font-size:14px;margin-top:12px';
+  $('doneInfo').appendChild(note);
+  if (result.endsWith('-sent') || result.startsWith('text-sent')) { note.textContent = '💬 ส่งสรุปเข้ากลุ่มแล้ว'; note.style.color = 'var(--mut)'; return; }
+
+  note.innerHTML = `<div class="warn" style="text-align:left">${result === 'not-group'
+      ? '⚠️ ฟอร์มนี้ไม่ได้เปิดจากในกลุ่ม LINE จึงยังไม่ได้ส่งการ์ดสรุปเข้ากลุ่ม'
+      : '⚠️ ส่งการ์ดสรุปเข้ากลุ่มไม่สำเร็จ: ' + esc(result)}</div>`;
+  let canShare = false;
+  try { canShare = liff.isApiAvailable('shareTargetPicker'); } catch (e) {}
+  if (canShare) {
+    const b = document.createElement('button');
+    b.className = 'btn-send'; b.type = 'button'; b.style.marginTop = '10px';
+    b.textContent = '📤 ส่งสรุปเข้ากลุ่ม LINE (เลือกกลุ่ม)';
+    b.onclick = async () => {
+      try {
+        const r = await liff.shareTargetPicker([buildFlex(res)], { isMultiple: false });
+        if (r) { note.innerHTML = '💬 ส่งสรุปเข้ากลุ่มแล้ว'; logChat(res.reportId, ctxType, 'share-sent'); }
+        else logChat(res.reportId, ctxType, 'share-cancel');
+      } catch (e) { note.insertAdjacentHTML('beforeend', `<p style="color:var(--err)">ส่งไม่สำเร็จ: ${esc(e.message || e)}</p>`); logChat(res.reportId, ctxType, 'share-ERR ' + (e.message || e)); }
+    };
+    note.appendChild(b);
+  } else {
+    note.insertAdjacentHTML('beforeend', '<p style="color:var(--mut)">ครั้งหน้า ให้เปิดฟอร์มจากลิงก์ที่ปักหมุดในกลุ่ม LINE ของ Site</p>');
+  }
+}
+
+/* บันทึกผลการส่งการ์ดเข้าแชทลงชีต (คอลัมน์ ChatStatus) เพื่อใช้ตรวจสอบย้อนหลัง */
+function logChat(reportId, ctx, result) {
+  let env = '';
+  try { env = [liff.getOS(), liff.getLineVersion() || '', liff.isInClient() ? 'in-LINE' : 'external'].join(' '); } catch (e) {}
+  api('chatlog', { reportId, ctx, result: String(result).slice(0, 300), env }).catch(() => {});
 }
 
 /* ชื่อผู้ทำ (แสดงเมื่อไม่ได้ทำครบทุกคน หรือชั่วโมงไม่เท่ากัน) */
