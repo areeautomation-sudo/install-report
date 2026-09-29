@@ -407,7 +407,8 @@ async function showDone(res) {
   try {
     const ctx = liff.getContext();
     if (ctx && ['utou', 'group', 'room', 'square_chat'].includes(ctx.type)) {
-      await liff.sendMessages([{ type: 'text', text: buildChatText(res) }]);
+      try { await liff.sendMessages([buildFlex(res)]); }
+      catch (flexErr) { await liff.sendMessages([{ type: 'text', text: buildChatText(res) }]); }  // สำรอง: ข้อความธรรมดา
       sentTo = ctx.type === 'utou' ? 'แชทส่วนตัว' : 'กลุ่ม';
     }
   } catch (e) { sentTo = 'ERR:' + (e.message || e); }
@@ -436,6 +437,54 @@ function buildChatText(res) {
   if (res.pdfUrl) L.push(`📄 PDF: ${res.pdfUrl}`);
   const t = L.join('\n');
   return t.length > 4900 ? t.slice(0, 4890) + '\n…' : t;
+}
+
+/* ---------- การ์ด Flex สำหรับโพสต์เข้ากลุ่ม ---------- */
+function buildFlex(res) {
+  const s = res.summary, MAXROWS = 12;
+  const T = (text, o) => Object.assign({ type: 'text', text: String(text || '-'), wrap: true, size: 'sm' }, o || {});
+  const row = (name, val, sub) => ({
+    type: 'box', layout: 'horizontal', spacing: 'sm', contents: [
+      T(name, { flex: 6, color: '#1c2733' }),
+      T(val, { flex: 4, align: 'end', weight: 'bold', color: '#1c2733' }),
+      ...(sub ? [T(sub, { flex: 2, align: 'end', size: 'xs', color: '#6b7785', gravity: 'center' })] : [])
+    ]
+  });
+  const section = (title, color) => T(title, { weight: 'bold', color, size: 'sm', margin: 'lg' });
+  const clip = (arr, fn) => {
+    const out = arr.slice(0, MAXROWS).map(fn);
+    if (arr.length > MAXROWS) out.push(T(`… และอีก ${arr.length - MAXROWS} รายการ (ดูใน PDF)`, { size: 'xs', color: '#6b7785' }));
+    return out;
+  };
+
+  const body = [
+    T(`👷 ${s.headcount} คน: ${s.employees.join(', ')}`, { color: '#4a5968' }),
+    { type: 'separator', margin: 'md' },
+    section('🔧 งานวันนี้', '#1f4e78'),
+    ...clip(s.items, i => row(i.name, `${i.qty} ${i.unit}`, `${i.hours} ชม.`))
+  ];
+  if ((s.cumulative || []).length) {
+    body.push({ type: 'separator', margin: 'lg' }, section(`📊 ยอดสะสม ${s.site}`, '#067a36'),
+      ...clip(s.cumulative, c => row(c.name, `${c.qty} ${c.unit}`)));
+  }
+  if (res.photoCount) body.push(T(`🖼 รูปหน้างาน ${res.photoCount} รูป`, { size: 'xs', color: '#6b7785', margin: 'lg' }));
+
+  const bubble = {
+    type: 'bubble', size: 'mega',
+    header: { type: 'box', layout: 'vertical', backgroundColor: '#1f4e78', paddingAll: '16px', contents: [
+      T('📋 DAILY REPORT', { color: '#ffffff', weight: 'bold', size: 'md' }),
+      T(`${s.date} · ${s.site}`, { color: '#ffffff', size: 'sm', margin: 'sm' }),
+      T(`เลขที่ ${res.reportId}`, { color: '#b9cde0', size: 'xs' })
+    ]},
+    body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: body }
+  };
+  if (res.pdfUrl) bubble.footer = { type: 'box', layout: 'vertical', contents: [{
+    type: 'button', style: 'primary', color: '#06c755', height: 'sm',
+    action: { type: 'uri', label: '📄 เปิด PDF', uri: res.pdfUrl }
+  }]};
+
+  const alt = `📋 Daily Report ${s.date} · ${s.site} · ${s.items.length} งาน`;
+  return { type: 'flex', altText: alt.slice(0, 400), contents: bubble };
 }
 
 function showErr(t) { const m = $('msg'); m.textContent = t; m.className = 'msg err'; window.scrollTo({ top: 0, behavior: 'smooth' }); }
